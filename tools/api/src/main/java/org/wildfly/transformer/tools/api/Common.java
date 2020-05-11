@@ -22,6 +22,7 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.Calendar;
 import java.util.Enumeration;
 import java.util.jar.JarEntry;
@@ -102,6 +103,13 @@ public abstract class Common {
             safeClose(jar);
             safeClose(jarOutputStream);
         }
+    }
+
+    protected static void transformModules(Path modules, String modulesMappingFile,
+            boolean transformArtifacts,
+            String packagesMappingFile) throws IOException {
+        JBossModulesTransformer.transform(modules, modulesMappingFile,
+                transformArtifacts, packagesMappingFile);
     }
 
     private static void safeClose(final Closeable c) {
