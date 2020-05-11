@@ -56,9 +56,12 @@ final class JBossModulesTransformer {
 
     private static Boolean DEBUG = Boolean.getBoolean("transform.modules.debug");
 
-    static void transform(Path modules, String modulesMappingFile,
+    static Map<String, TransformedModule> transform(Path modules, String modulesMappingFile,
             boolean transformArtifacts,
             final String packagesMappingFile) throws IOException {
+        if (!Files.exists(modules) || !Files.isDirectory(modules)) {
+            throw new IllegalArgumentException("Invalid modules directory " + modules);
+        }
         Map<String, String> modulesMapping = buildMapping(modulesMappingFile);
         Map<String, String> nameMapping = new HashMap<>();
         for (Entry<String, String> entry : modulesMapping.entrySet()) {
@@ -71,7 +74,7 @@ final class JBossModulesTransformer {
         visitLayers(modules, files);
         visitAddOns(modules, files);
         visitOtherModules(modules, files);
-
+        Map<String, TransformedModule> transformedModules = new HashMap<>();
         try {
             for (Entry<Path, Set<Path>> entry : files.entrySet()) {
                 //recreate the root dir
@@ -84,24 +87,32 @@ final class JBossModulesTransformer {
                     for (Entry<String, String> mapping : modulesMapping.entrySet()) {
                         Path key = Paths.get(mapping.getKey());
                         Path value = Paths.get(mapping.getValue());
-                        if (path.startsWith(key)) {
+                        if (path.equals(key)) { // an empty directory that matches the mapping
+                            transformed = value;
+                        } else if (path.startsWith(key)) {
                             Path suffix = path.subpath(key.getNameCount(), path.getNameCount());
                             transformed = value.resolve(suffix);
                             name = value.toString().replaceAll("/", ".");
                             break;
                         }
                     }
-                    //create the parent directory
+
+                    Path src = srcRootDir.resolve(path);
+                    // Just a directory, create transformed one
+                    if (Files.isDirectory(src)) {
+                        Files.createDirectories(targetRootDir.resolve(transformed));
+                        continue;
+                    }
+                    //create the parent directories
                     Path parentDir = targetRootDir.resolve(transformed.getParent());
                     Files.createDirectories(parentDir);
                     Path target = parentDir.resolve(transformed.getFileName());
                     //copy content from original
-                    Path src = srcRootDir.resolve(path);
                     if (src.getFileName().toString().equals("module.xml")) {
                         // Transform it
-                        transformDescriptor(src, target, name, nameMapping);
+                        transformDescriptor(src, target, name, nameMapping, transformedModules);
                     } else {
-                        if (transformArtifacts) {
+                        if (transformArtifacts && src.toString().endsWith(".jar")) {
                             if (DEBUG) {
                                 System.out.println("Transforming jar file " + src.toFile());
                             }
@@ -119,7 +130,7 @@ final class JBossModulesTransformer {
             // Just in case something went wrong
             recursiveDelete(wkDir);
         }
-
+        return transformedModules;
     }
 
     private static Map<String, String> buildMapping(String mappingFile) throws IOException {
@@ -149,7 +160,7 @@ final class JBossModulesTransformer {
         return mapping;
     }
 
-    public static void recursiveDelete(Path root) {
+    static void recursiveDelete(Path root) {
         if (root == null || !Files.exists(root)) {
             return;
         }
@@ -224,6 +235,10 @@ final class JBossModulesTransformer {
                 if (dir.getFileName().toString().equals(SYSTEM) && dir.getParent().equals(modulesDir)) {
                     return FileVisitResult.SKIP_SUBTREE;
                 }
+                // Add empty directories.
+                if (Files.list(dir).count() == 0) {
+                    files.add(modulesDir.relativize(dir));
+                }
                 return FileVisitResult.CONTINUE;
             }
 
@@ -239,6 +254,15 @@ final class JBossModulesTransformer {
         Files.walkFileTree(source, EnumSet.of(FileVisitOption.FOLLOW_LINKS), Integer.MAX_VALUE,
                 new SimpleFileVisitor<Path>() {
 
+                    @Override
+                    public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                        // Add empty directories.
+                        if (Files.list(dir).count() == 0) {
+                            files.add(source.relativize(dir));
+                        }
+                        return FileVisitResult.CONTINUE;
+                    }
+
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
                     throws IOException {
@@ -250,7 +274,7 @@ final class JBossModulesTransformer {
         });
     }
 
-    private static void transformDescriptor(Path orig, Path target, String name, Map<String, String> nameMapping) throws IOException {
+    private static void transformDescriptor(Path orig, Path target, String name, Map<String, String> nameMapping, Map<String, TransformedModule> transformedModules) throws IOException {
         FileInputStream fileInputStream = new FileInputStream(orig.toFile());
         DocumentBuilderFactory documentBuilderFactory = DocumentBuilderFactory.newInstance();
         org.w3c.dom.Document document = null;
@@ -267,11 +291,14 @@ final class JBossModulesTransformer {
                 && !root.getTagName().equals("module-alias")) {
             return;
         }
+        String originalName = root.getAttribute("name");
+        TransformedModule transformedModule = null;
         if (name != null) {
             if (DEBUG) {
-                System.out.println("Transforming JBoss module " + root.getAttribute("name") + " => " + name);
+                System.out.println("Transforming JBoss module " + originalName + " => " + name);
             }
             root.setAttribute("name", name);
+            transformedModule = new TransformedModule(name, originalName);
         }
         final NodeList dependenciesElement = root.getElementsByTagName("dependencies");
         if (dependenciesElement != null && dependenciesElement.getLength() > 0) {
@@ -287,8 +314,12 @@ final class JBossModulesTransformer {
                     String transformed = nameMapping.get(value);
                     if (transformed != null) {
                         if (DEBUG) {
-                            System.out.println("module" + root.getAttribute("name") + ", " + value + " => " + transformed);
+                            System.out.println("module " + root.getAttribute("name") + ", " + value + " => " + transformed);
                         }
+                        if (transformedModule == null) {
+                            transformedModule = new TransformedModule(originalName, originalName);
+                        }
+                        transformedModule.addDependency(value, transformed);
                         element.setAttribute("name", transformed);
                     }
                 }
@@ -305,6 +336,8 @@ final class JBossModulesTransformer {
         } catch (TransformerException ex) {
             throw new IOException(ex);
         }
-
+        if (transformedModule != null) {
+            transformedModules.put(originalName, transformedModule);
+        }
     }
 }

@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Calendar;
 import java.util.Enumeration;
+import java.util.Map;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.jar.JarOutputStream;
@@ -105,10 +106,10 @@ public abstract class Common {
         }
     }
 
-    protected static void transformModules(Path modules, String modulesMappingFile,
+    protected static Map<String, TransformedModule> transformModules(Path modules, String modulesMappingFile,
             boolean transformArtifacts,
             String packagesMappingFile) throws IOException {
-        JBossModulesTransformer.transform(modules, modulesMappingFile,
+        return JBossModulesTransformer.transform(modules, modulesMappingFile,
                 transformArtifacts, packagesMappingFile);
     }
 
