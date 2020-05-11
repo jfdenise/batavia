@@ -80,6 +80,19 @@ public class JBossModulesTransformationTestCase {
     @Test
     public void testTransformModules() throws Exception {
         Path modules = Files.createTempDirectory("transform-modules-tests");
+        doTestTransformModules(modules, modules);
+
+        modules = Files.createTempDirectory("transform-modules-tests");
+        Path layers = modules.resolve("system/layers/base");
+        Files.createDirectories(layers);
+        doTestTransformModules(modules, layers);
+        modules = Files.createTempDirectory("transform-modules-tests");
+        Path addOns = modules.resolve("system/add-ons/foo");
+        Files.createDirectories(addOns);
+        doTestTransformModules(modules, addOns);
+    }
+
+    private void doTestTransformModules(Path rootModules, Path modules) throws Exception {
         try {
             Path dir = Files.createDirectories(modules.resolve("javax/foo/bar/main"));
             Path p = dir.resolve("foo.txt");
@@ -110,7 +123,7 @@ public class JBossModulesTransformationTestCase {
             Path other = otherDir.resolve("module.xml");
             Files.write(other, otherModule.getBytes());
 
-            Map<String, TransformedModule> transformedModules = Common.transformModules(modules, null, false, null);
+            Map<String, TransformedModule> transformedModules = Common.transformModules(rootModules, null, false, null);
             Assert.assertTrue(transformedModules.size() == 3);
             Assert.assertTrue(Files.exists(p));
             Assert.assertEquals("hello", new String(Files.readAllBytes(p)));
@@ -150,8 +163,8 @@ public class JBossModulesTransformationTestCase {
             Assert.assertTrue(otherTransModule.getTransformedDependencies().get("javax.json.bind.api").equals("jakarta.json.bind.api"));
 
         } finally {
-            JBossModulesTransformer.recursiveDelete(modules);
-            Assert.assertFalse(Files.exists(modules));
+            JBossModulesTransformer.recursiveDelete(rootModules);
+            Assert.assertFalse(Files.exists(rootModules));
         }
     }
 
